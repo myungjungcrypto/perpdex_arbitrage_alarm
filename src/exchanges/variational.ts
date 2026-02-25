@@ -53,10 +53,22 @@ export class VariationalAdapter extends BaseExchangeAdapter {
   private async poll() {
     try {
       const res = await fetch(`${this.restUrl}/metadata/stats`);
-      const data = await res.json() as any[];
+      const data = await res.json() as any;
       const now = Date.now();
 
-      for (const item of (Array.isArray(data) ? data : [])) {
+      // Log response structure on first poll for debugging
+      const items = Array.isArray(data) ? data : (data?.results ?? data?.data ?? []);
+      if (items.length > 0) {
+        this.log.debug({
+          sampleKeys: Object.keys(items[0]),
+          sampleTicker: items[0].ticker ?? items[0].symbol ?? items[0].market,
+          count: items.length,
+        }, 'Poll response sample');
+      } else {
+        this.log.debug({ responseType: typeof data, keys: data ? Object.keys(data) : [] }, 'Poll response empty or unexpected format');
+      }
+
+      for (const item of items) {
         const ticker = item.ticker ?? item.symbol ?? '';
         const canonical = this.findCanonical(ticker);
         if (!canonical) continue;

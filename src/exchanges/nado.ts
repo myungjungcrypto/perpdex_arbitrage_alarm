@@ -109,6 +109,8 @@ export class NadoAdapter extends BaseExchangeAdapter {
   private handleMessage(msg: any) {
     const now = Date.now();
 
+    this.log.debug({ channel: msg.channel ?? msg.type, keys: Object.keys(msg) }, 'WS message received');
+
     if (msg.channel === 'best_bid_offer' || msg.type === 'best_bid_offer') {
       this.handleBbo(msg.data ?? msg, now);
     }

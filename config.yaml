@@ -6,7 +6,7 @@ exchanges:
 
   paradex:
     enabled: true
-    ws_url: "wss://ws.api.prod.paradex.trade/v1/"
+    ws_url: "wss://ws.api.prod.paradex.trade/v1"
     rest_url: "https://api.prod.paradex.trade"
 
   nado:
@@ -20,7 +20,7 @@ exchanges:
     rest_url: "https://mainnet.zklighter.elliot.ai"
 
   extended:
-    enabled: true
+    enabled: false  # 403 Forbidden - requires Stark key auth, disabled until configured
     ws_url: "wss://api.starknet.extended.exchange/stream.extended.exchange/v1"
     rest_url: "https://api.starknet.extended.exchange/api/v1"
 

@@ -4,7 +4,8 @@ import { registerAdapter } from './registry.js';
 import type { ExchangeConfig, PriceData } from '../types.js';
 
 // Paradex uses JSON-RPC 2.0 over WebSocket
-// BBO channel with 50ms refresh, markets_summary for mark/oracle prices
+// BBO channel is event-driven (no artificial throttling, fires on price/size change)
+// markets_summary for mark/oracle prices
 // Pair format: "BTC-USD-PERP", "ETH-USD-PERP", etc.
 
 const RECONNECT_BASE_MS = 1000;
@@ -24,7 +25,8 @@ export class ParadexAdapter extends BaseExchangeAdapter {
 
   constructor(config: ExchangeConfig) {
     super('paradex');
-    this.wsUrl = config.ws_url ?? 'wss://ws.api.prod.paradex.trade/v1/';
+    // No trailing slash — /v1/ returns 404, /v1 is correct
+    this.wsUrl = config.ws_url?.replace(/\/$/, '') ?? 'wss://ws.api.prod.paradex.trade/v1';
     this.restUrl = config.rest_url ?? 'https://api.prod.paradex.trade';
   }
 
@@ -96,13 +98,13 @@ export class ParadexAdapter extends BaseExchangeAdapter {
   private subscribe() {
     if (!this.ws) return;
 
-    // Subscribe to BBO for each pair (50ms refresh)
+    // Subscribe to BBO for each pair (event-driven, no refresh_rate needed)
     for (const canonical of this.pairs) {
       const exSym = this.mapPairToExchange(canonical);
       this.ws.send(JSON.stringify({
         jsonrpc: '2.0',
         method: 'subscribe',
-        params: { channel: `bbo.${exSym}`, refresh_rate: '50ms' },
+        params: { channel: `bbo.${exSym}` },
         id: ++this.rpcId,
       }));
     }
@@ -120,6 +122,14 @@ export class ParadexAdapter extends BaseExchangeAdapter {
 
   private handleMessage(msg: any) {
     const now = Date.now();
+
+    // Log subscription responses and errors
+    if (msg.error) {
+      this.log.warn({ error: msg.error, id: msg.id }, 'JSON-RPC error response');
+    }
+    if (msg.result !== undefined && msg.id) {
+      this.log.debug({ result: msg.result, id: msg.id }, 'Subscription confirmed');
+    }
 
     // JSON-RPC notification
     if (msg.params?.channel) {

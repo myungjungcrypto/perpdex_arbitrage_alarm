@@ -9,17 +9,17 @@ import type { ExchangeConfig, PriceData } from '../types.js';
 // Pair format: "BTC-USDC" or "BTC-USDC-PERP"
 // Server pings every 15s, expects pong within 10s
 
-const RECONNECT_BASE_MS = 1000;
-const RECONNECT_MAX_MS = 30000;
+const RECONNECT_BASE_MS = 2000;
+const RECONNECT_MAX_MS = 60000;
+const MAX_RECONNECT_ATTEMPTS = 5;
 
 export class ExtendedAdapter extends BaseExchangeAdapter {
   private connections = new Map<string, WebSocket>(); // canonical -> ws
   private wsBaseUrl: string;
   private restUrl: string;
-  private reconnectAttempts = 0;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private shouldReconnect = true;
   private canonicalByExSymbol = new Map<string, string>();
+  private pairReconnectAttempts = new Map<string, number>(); // per-pair retry count
 
   constructor(config: ExchangeConfig) {
     super('extended');
@@ -57,9 +57,9 @@ export class ExtendedAdapter extends BaseExchangeAdapter {
 
   async disconnect(): Promise<void> {
     this.shouldReconnect = false;
-    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     for (const [, ws] of this.connections) ws.close(1000);
     this.connections.clear();
+    this.pairReconnectAttempts.clear();
     this.setConnected(false);
   }
 
@@ -93,9 +93,15 @@ export class ExtendedAdapter extends BaseExchangeAdapter {
 
       ws.on('close', (code) => {
         this.connections.delete(canonical);
-        this.log.warn({ pair: canonical, code }, 'Stream closed');
-        if (this.shouldReconnect) {
-          setTimeout(() => this.connectPairWs(canonical).catch(() => {}), 5000);
+        const attempts = (this.pairReconnectAttempts.get(canonical) ?? 0) + 1;
+        this.pairReconnectAttempts.set(canonical, attempts);
+
+        if (this.shouldReconnect && attempts <= MAX_RECONNECT_ATTEMPTS) {
+          const delay = Math.min(RECONNECT_BASE_MS * 2 ** (attempts - 1), RECONNECT_MAX_MS);
+          this.log.warn({ pair: canonical, code, attempt: attempts, nextRetryMs: delay }, 'Stream closed, retrying');
+          setTimeout(() => this.connectPairWs(canonical).catch(() => {}), delay);
+        } else if (attempts > MAX_RECONNECT_ATTEMPTS) {
+          this.log.error({ pair: canonical, attempts }, 'Max reconnect attempts reached, giving up');
         }
         if (this.connections.size === 0) this.setConnected(false);
       });

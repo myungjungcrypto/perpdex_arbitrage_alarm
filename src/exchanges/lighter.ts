@@ -71,19 +71,40 @@ export class LighterAdapter extends BaseExchangeAdapter {
       const books = data.order_books ?? data.orderBooks ?? data ?? [];
 
       this.marketIndexMap.clear();
+      const allSymbols: string[] = [];
       for (const book of (Array.isArray(books) ? books : [])) {
         const symbol = book.symbol ?? book.name ?? '';
         const index = book.order_book_index ?? book.orderBookIndex ?? book.index;
+        allSymbols.push(symbol);
         if (index === undefined) continue;
 
         // Try multiple symbol formats to match
-        const canonical = this.canonicalByExSymbol.get(symbol);
+        let canonical = this.canonicalByExSymbol.get(symbol);
+
+        // Also try: "BTC_USD" -> "BTC-USD", "BTCUSD" -> "BTC-USD"
+        if (!canonical) {
+          const normalized = symbol.replace('_', '-');
+          canonical = this.canonicalByExSymbol.get(normalized);
+        }
+        if (!canonical) {
+          // Try extracting base from symbol like "BTCUSD_PERP"
+          const match = symbol.match(/^([A-Z]+)[-_]?USD/);
+          if (match) {
+            canonical = this.canonicalByExSymbol.get(`${match[1]}-USD`);
+          }
+        }
+
         if (canonical) {
           this.marketIndexMap.set(Number(index), canonical);
           this.markets.push({ orderBookIndex: Number(index), symbol });
         }
       }
-      this.log.info({ mapped: this.marketIndexMap.size }, 'Markets fetched');
+      this.log.info({
+        mapped: this.marketIndexMap.size,
+        total: allSymbols.length,
+        sampleSymbols: allSymbols.slice(0, 10),
+        wanted: Array.from(this.canonicalByExSymbol.keys()),
+      }, 'Markets fetched');
     } catch (err) {
       this.log.error({ err }, 'Failed to fetch markets');
     }
@@ -142,6 +163,8 @@ export class LighterAdapter extends BaseExchangeAdapter {
 
   private handleMessage(msg: any) {
     const now = Date.now();
+
+    this.log.debug({ type: msg.type, keys: Object.keys(msg) }, 'WS message received');
 
     // Handle order book updates
     const index = msg.order_book_index ?? msg.orderBookIndex;
