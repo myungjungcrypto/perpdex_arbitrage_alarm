@@ -1,0 +1,59 @@
+exchanges:
+  hyperliquid:
+    enabled: true
+    ws_url: "wss://api.hyperliquid.xyz/ws"
+    rest_url: "https://api.hyperliquid.xyz"
+
+  paradex:
+    enabled: true
+    ws_url: "wss://ws.api.prod.paradex.trade/v1/"
+    rest_url: "https://api.prod.paradex.trade"
+
+  nado:
+    enabled: true
+    ws_url: "wss://gateway.prod.nado.xyz/v1/subscribe"
+    rest_url: "https://gateway.prod.nado.xyz/v1"
+
+  lighter:
+    enabled: true
+    ws_url: "wss://mainnet.zklighter.elliot.ai/stream"
+    rest_url: "https://mainnet.zklighter.elliot.ai"
+
+  extended:
+    enabled: true
+    ws_url: "wss://api.starknet.extended.exchange/stream.extended.exchange/v1"
+    rest_url: "https://api.starknet.extended.exchange/api/v1"
+
+  variational:
+    enabled: true
+    rest_url: "https://omni-client-api.prod.ap-northeast-1.variational.io"
+    poll_interval_ms: 1000
+
+  01xyz:
+    enabled: false
+    rest_url: "https://zo-mainnet.n1.xyz"
+
+pairs:
+  - BTC-PERP
+  - ETH-PERP
+  - SOL-PERP
+  - HYPE-PERP
+  - BNB-PERP
+
+thresholds:
+  default:
+    min_spread_pct: 0.3
+    sustained_ms: 2000
+    cooldown_ms: 30000
+  BTC-PERP:
+    min_spread_pct: 0.2
+  ETH-PERP:
+    min_spread_pct: 0.2
+
+dashboard:
+  port: 3000
+  update_interval_ms: 200
+
+alerts:
+  telegram:
+    enabled: false

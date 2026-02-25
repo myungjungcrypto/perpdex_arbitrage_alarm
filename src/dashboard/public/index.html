@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PerpDEX Arbitrage Monitor</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>PerpDEX Arbitrage Monitor</h1>
+    <div id="connection-status" class="status disconnected">Disconnected</div>
+  </header>
+
+  <!-- Exchange connection statuses -->
+  <section id="exchange-bar">
+    <div class="section-title">Exchanges</div>
+    <div id="exchange-statuses"></div>
+  </section>
+
+  <!-- Controls -->
+  <section id="controls">
+    <input type="text" id="filter-pair" placeholder="Filter pair (e.g. BTC)" />
+    <input type="text" id="filter-exchange" placeholder="Filter exchange" />
+    <label>
+      Min spread %:
+      <input type="number" id="filter-min-spread" value="0" step="0.01" min="0" />
+    </label>
+    <label>
+      Sort by:
+      <select id="sort-by">
+        <option value="spreadPct">Spread %</option>
+        <option value="pair">Pair</option>
+        <option value="spreadAbs">Spread $</option>
+        <option value="timestamp">Time</option>
+      </select>
+    </label>
+    <span id="stats"></span>
+  </section>
+
+  <!-- Spread table -->
+  <section id="spread-section">
+    <div class="section-title">Spreads</div>
+    <div id="spread-table-wrap">
+      <table id="spread-table">
+        <thead>
+          <tr>
+            <th>Pair</th>
+            <th>Buy Exchange</th>
+            <th>Buy Ask</th>
+            <th>Sell Exchange</th>
+            <th>Sell Bid</th>
+            <th>Spread $</th>
+            <th>Spread %</th>
+            <th>Age</th>
+          </tr>
+        </thead>
+        <tbody id="spread-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Price matrix -->
+  <section id="price-section">
+    <div class="section-title">Prices by Pair</div>
+    <div id="price-table-wrap">
+      <table id="price-table">
+        <thead id="price-head"></thead>
+        <tbody id="price-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Alerts log -->
+  <section id="alert-section">
+    <div class="section-title">Recent Alerts</div>
+    <div id="alert-log"></div>
+  </section>
+
+  <script src="app.js"></script>
+</body>
+</html>
