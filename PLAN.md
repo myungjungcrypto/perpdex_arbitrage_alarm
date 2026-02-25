@@ -16,19 +16,35 @@
 
 ## 2. 거래소별 API 분석
 
-| 거래소 | API 타입 | WebSocket 엔드포인트 | 가격 업데이트 주기 | Rate Limit | 비고 |
-|---------|----------|---------------------|-------------------|------------|------|
-| **Hyperliquid** | WS + REST | `wss://api.hyperliquid.xyz/ws` | 실시간 (AllMids) | 1000 WS subs/IP | 가장 성숙한 API, BBO/AllMids 구독 |
-| **Lighter** | WS + REST | `wss://mainnet.zklighter.elliot.ai/stream` | 50ms 배치 | IP + API Key 기반 | orderbook 50ms 배치 전송 |
-| **Paradex** | WS + REST | docs.paradex.trade 참조 | BBO: 실시간, OB: 50ms | 1500 req/m (REST) | BBO 채널 실시간 스트림 |
-| **01.xyz** | WS + REST | docs.01.xyz 참조 | 실시간 | 문서 확인 필요 | N1 기반, SDK 지원 (TS/Py/Rust) |
-| **Nado** | WS + REST | `wss://gateway.prod.nado.xyz/v1/ws` | 5-15ms 레이턴시 | 문서 확인 필요 | 가장 빠른 매칭 엔진 |
-| **Extended** | WS + REST | `wss://starknet.extended.exchange/stream.../v1` | 비동기 | 문서 확인 필요 | Starknet 기반, Stark Key 필요 |
-| **Variational** | REST only | 없음 (개발중) | 최대 600s 캐시 | 10 req/10s | ⚠️ WS 미지원, 폴링 필요 |
+| 거래소 | API 타입 | WebSocket 엔드포인트 | 가격 업데이트 주기 | Rate Limit | BTC | ETH | SOL | HYPE | BNB |
+|---------|----------|---------------------|-------------------|------------|-----|-----|-----|------|-----|
+| **Hyperliquid** | WS + REST | `wss://api.hyperliquid.xyz/ws` | 실시간 (AllMids, event-driven) | 1000 WS subs/IP, 1200 wt/min REST | O | O | O | O | O |
+| **Paradex** | WS + REST | `wss://ws.api.prod.paradex.trade/v1/` | **50ms** (BBO 채널) | 200 req/s REST, 20 WS conn/s | O | O | O | O | O |
+| **Nado** | WS + REST | `wss://gateway.prod.nado.xyz/v1/subscribe` | **~50ms** book, event-driven BBO | 120 query/min, 600 order/min | O | O | O | ? | O |
+| **Lighter** | WS + REST | `wss://mainnet.zklighter.elliot.ai/stream` | **50ms** 배치 | 24,000 wt/60s (premium) | O | O | O | O | ? |
+| **Extended** | WS + REST | `wss://api.starknet.extended.exchange/...` | **100ms** push | 1,000 req/min REST | O | O | O | ? | ? |
+| **01.xyz** | REST (로컬) | 미문서화 (베타) | 미확인 | 미문서화 (베타) | O | ? | O | ? | ? |
+| **Variational** | REST only | 없음 (개발중) | 최대 600s 캐시 | 10 req/10s | O | O | O | O | O |
+
+### 거래소 Tier 분류
+
+**Tier 1 — 즉시 운영 가능, 최적:**
+1. **Hyperliquid**: 가장 성숙한 API. `allMids` WS로 전체 자산 mid price 실시간 수신. 5개 페어 모두 지원.
+2. **Paradex**: BBO 50ms refresh, JSON-RPC 2.0, REST 200req/s. 5개 페어 모두 지원. 소매 수수료 무료.
+3. **Nado**: 5-15ms 매칭 엔진, 50ms book depth, Kraken 팀 제작. TS/Py/Rust SDK. HYPE 미확인.
+
+**Tier 2 — 양호, 일부 제약:**
+4. **Lighter**: 50ms OB 배치, 수수료 무료. BNB 미확인.
+5. **Extended**: 100ms OB push. Starknet 기반. BNB/HYPE 미확인.
+
+**Tier 3 — 현재 부적합:**
+6. **01.xyz**: 베타 단계. 로컬 자체 호스팅 REST. 공개 WS 문서 없음.
+7. **Variational**: REST only, 600초 캐싱, 10req/10s. 실시간 트래킹 근본적으로 불가.
 
 ### 주요 리스크
 - **Variational**: WebSocket 미지원, REST rate limit 매우 낮음 (1req/s). 100ms 트래킹 불가능 → 1초 간격 폴링으로 대체
-- **일부 거래소**: 특정 페어 미지원 가능성 (HYPE, BNB 등)
+- **01.xyz**: 베타 단계, 자체 호스팅 REST API 모델. 프로덕션 운영 시 추가 조사 필요
+- **일부 거래소**: 특정 페어 미지원 가능성 (HYPE — Nado/Extended/01.xyz, BNB — Lighter/Extended/01.xyz)
 
 ---
 
@@ -388,21 +404,30 @@ exchanges:
   hyperliquid:
     enabled: true
     ws_url: "wss://api.hyperliquid.xyz/ws"
+    rest_url: "https://api.hyperliquid.xyz"
   lighter:
     enabled: true
     ws_url: "wss://mainnet.zklighter.elliot.ai/stream"
+    rest_url: "https://mainnet.zklighter.elliot.ai"
   paradex:
     enabled: true
+    ws_url: "wss://ws.api.prod.paradex.trade/v1/"
+    rest_url: "https://api.prod.paradex.trade"
   01xyz:
-    enabled: true
+    enabled: false  # 베타 — 메인넷 출시 후 활성화
+    rest_url: "https://zo-mainnet.n1.xyz"
   nado:
     enabled: true
-    ws_url: "wss://gateway.prod.nado.xyz/v1/ws"
+    ws_url: "wss://gateway.prod.nado.xyz/v1/subscribe"
+    rest_url: "https://gateway.prod.nado.xyz/v1"
   extended:
     enabled: true
+    ws_url: "wss://api.starknet.extended.exchange/stream.extended.exchange/v1"
+    rest_url: "https://api.starknet.extended.exchange/api/v1"
   variational:
     enabled: true
-    poll_interval_ms: 1000  # REST 폴링
+    rest_url: "https://omni-client-api.prod.ap-northeast-1.variational.io"
+    poll_interval_ms: 1000  # REST 폴링 (WS 미지원)
 
 pairs:
   - BTC-PERP
@@ -430,14 +455,45 @@ alerts:
 
 ---
 
-## 13. 참고 API 문서 링크
+## 13. 거래소별 WebSocket 구독 예시
 
-| 거래소 | 문서 |
-|--------|------|
-| Hyperliquid | https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket |
-| Lighter | https://apidocs.lighter.xyz/docs/websocket-reference |
-| Paradex | https://docs.paradex.trade/ws/general-information/introduction |
-| 01.xyz | https://docs.01.xyz / https://api.01.xyz |
-| Nado | https://docs.nado.xyz/developer-resources/api |
-| Extended | https://api.docs.extended.exchange |
-| Variational | https://docs.variational.io/technical-documentation/api |
+### Hyperliquid — AllMids (전체 자산 mid price 실시간)
+```json
+{ "method": "subscribe", "subscription": { "type": "allMids" } }
+```
+응답: `{ "mids": { "BTC": "67234.5", "ETH": "3456.7", ... } }`
+
+### Paradex — BBO (Best Bid/Offer, 50ms)
+```json
+{ "jsonrpc": "2.0", "method": "subscribe", "params": { "channel": "bbo.BTC-USD-PERP" } }
+```
+
+### Nado — best_bid_offer (event-driven)
+```json
+{ "method": "subscribe", "params": { "channel": "best_bid_offer", "market": "BTC-PERP" } }
+```
+- 헤더 필수: `Sec-WebSocket-Extensions: permessage-deflate`
+
+### Lighter — Order Book (50ms 배치)
+```
+wss://mainnet.zklighter.elliot.ai/stream 접속 후 orderbook 채널 구독
+```
+
+### Extended — Order Book Stream (100ms)
+```
+GET /stream.extended.exchange/v1/orderbooks/{market}
+```
+
+---
+
+## 14. 참고 API 문서 링크
+
+| 거래소 | 메인 문서 | WebSocket | REST | SDK |
+|--------|-----------|-----------|------|-----|
+| Hyperliquid | [API Docs](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api) | [WS](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket) | [Info Endpoint](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint/perpetuals) | [Python SDK](https://github.com/hyperliquid-dex/hyperliquid-python-sdk) |
+| Paradex | [Docs](https://docs.paradex.trade) | [WS](https://docs.paradex.trade/ws/general-information/introduction) | [REST](https://docs.paradex.trade/api/general-information) | [Python SDK](https://tradeparadex.github.io/paradex-py/) |
+| Nado | [Docs](https://docs.nado.xyz) | [Subscriptions](https://docs.nado.xyz/developer-resources/api/subscriptions) | [Endpoints](https://docs.nado.xyz/developer-resources/api/endpoints) | TS/Py/Rust SDK |
+| Lighter | [Docs](https://docs.lighter.xyz) | [WS](https://apidocs.lighter.xyz/docs/websocket-reference) | [API](https://apidocs.lighter.xyz) | JS SDK |
+| Extended | [Docs](https://docs.extended.exchange) | - | [API](https://api.docs.extended.exchange) | Python SDK |
+| 01.xyz | [Docs](https://docs.01.xyz) | 미문서화 | [API](https://api.01.xyz) | `@n1xyz/nord-ts` |
+| Variational | [Docs](https://docs.variational.io) | 없음 | [API](https://docs.variational.io/technical-documentation/api) | - |
