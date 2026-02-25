@@ -3,15 +3,17 @@ import { BaseExchangeAdapter } from './base.js';
 import { registerAdapter } from './registry.js';
 import type { ExchangeConfig, PriceData } from '../types.js';
 
-// Extended: Starknet-based, order book stream at 100ms push
+// Extended: Starknet-based, order book stream at 100ms push (10ms with ?depth=1)
 // WS: wss://api.starknet.extended.exchange/stream.extended.exchange/v1/orderbooks/{market}
 // REST: https://api.starknet.extended.exchange/api/v1
-// Pair format: "BTC-USDC" or "BTC-USDC-PERP"
-// Server pings every 15s, expects pong within 10s
+// Pair format: "BTC-USD", "ETH-USD" (NOT "BTC-USDC")
+// IMPORTANT: User-Agent header is REQUIRED for all requests (403 without it)
+// Orderbook fields: b (bids), a (asks), each entry has p (price), q (quantity)
 
 const RECONNECT_BASE_MS = 2000;
 const RECONNECT_MAX_MS = 60000;
 const MAX_RECONNECT_ATTEMPTS = 5;
+const USER_AGENT = 'perpdex-arbitrage-alarm/1.0';
 
 export class ExtendedAdapter extends BaseExchangeAdapter {
   private connections = new Map<string, WebSocket>(); // canonical -> ws
@@ -19,7 +21,7 @@ export class ExtendedAdapter extends BaseExchangeAdapter {
   private restUrl: string;
   private shouldReconnect = true;
   private canonicalByExSymbol = new Map<string, string>();
-  private pairReconnectAttempts = new Map<string, number>(); // per-pair retry count
+  private pairReconnectAttempts = new Map<string, number>();
 
   constructor(config: ExchangeConfig) {
     super('extended');
@@ -28,9 +30,9 @@ export class ExtendedAdapter extends BaseExchangeAdapter {
   }
 
   mapPairToExchange(canonical: string): string {
-    // "BTC-PERP" -> "BTC-USDC"
+    // "BTC-PERP" -> "BTC-USD"
     const base = canonical.replace(/-PERP$/, '');
-    return `${base}-USDC`;
+    return `${base}-USD`;
   }
 
   mapPairFromExchange(exSymbol: string): string | undefined {
@@ -44,7 +46,6 @@ export class ExtendedAdapter extends BaseExchangeAdapter {
 
     this.shouldReconnect = true;
 
-    // Connect one WS per pair (Extended uses per-market streams)
     const connectPromises = pairs.map((canonical) => this.connectPairWs(canonical));
     const results = await Promise.allSettled(connectPromises);
 
@@ -65,14 +66,18 @@ export class ExtendedAdapter extends BaseExchangeAdapter {
 
   private connectPairWs(canonical: string): Promise<void> {
     const exSym = this.mapPairToExchange(canonical);
-    const url = `${this.wsBaseUrl}/orderbooks/${exSym}`;
+    // Use ?depth=1 for BBO only (10ms push, lighter payload)
+    const url = `${this.wsBaseUrl}/orderbooks/${exSym}?depth=1`;
 
     return new Promise((resolve, reject) => {
-      const ws = new WebSocket(url);
+      const ws = new WebSocket(url, {
+        headers: { 'User-Agent': USER_AGENT },
+      });
 
       ws.on('open', () => {
         this.connections.set(canonical, ws);
-        this.log.debug({ pair: canonical }, 'Pair stream connected');
+        this.pairReconnectAttempts.set(canonical, 0); // reset on success
+        this.log.info({ pair: canonical, exSym }, 'Pair stream connected');
         resolve();
       });
 
@@ -86,10 +91,7 @@ export class ExtendedAdapter extends BaseExchangeAdapter {
       });
 
       ws.on('pong', () => { /* keepalive ok */ });
-
-      ws.on('ping', () => {
-        ws.pong();
-      });
+      ws.on('ping', () => { ws.pong(); });
 
       ws.on('close', (code) => {
         this.connections.delete(canonical);
@@ -115,12 +117,16 @@ export class ExtendedAdapter extends BaseExchangeAdapter {
 
   private handleOrderBook(canonical: string, msg: any) {
     const now = Date.now();
-    const bids = msg.bids ?? msg.buy ?? [];
-    const asks = msg.asks ?? msg.sell ?? [];
+
+    // Extended uses short field names: b (bids), a (asks)
+    // Each entry: { p: "price", q: "quantity", c: count }
+    // Also handle full field names as fallback
+    const bids = msg.b ?? msg.bids ?? [];
+    const asks = msg.a ?? msg.asks ?? [];
 
     if (bids.length > 0 && asks.length > 0) {
-      const bid = parseFloat(bids[0].price ?? bids[0][0] ?? '0');
-      const ask = parseFloat(asks[0].price ?? asks[0][0] ?? '0');
+      const bid = parseFloat(bids[0].p ?? bids[0].price ?? bids[0][0] ?? '0');
+      const ask = parseFloat(asks[0].p ?? asks[0].price ?? asks[0][0] ?? '0');
       if (bid > 0 && ask > 0) {
         this.emitPrice({
           exchange: this.name,
@@ -137,16 +143,20 @@ export class ExtendedAdapter extends BaseExchangeAdapter {
 
   private async fetchRestSnapshot() {
     try {
-      const res = await fetch(`${this.restUrl}/markets`);
-      const data = await res.json() as any[];
+      // Extended REST: /api/v1/info/markets
+      const res = await fetch(`${this.restUrl}/info/markets`, {
+        headers: { 'User-Agent': USER_AGENT },
+      });
+      const data = await res.json() as any;
       const now = Date.now();
+      const markets = Array.isArray(data) ? data : (data?.markets ?? []);
 
-      for (const market of (Array.isArray(data) ? data : [])) {
-        const sym = market.market ?? market.symbol ?? '';
+      for (const market of markets) {
+        const sym = market.m ?? market.market ?? market.symbol ?? '';
         const canonical = this.canonicalByExSymbol.get(sym);
         if (!canonical) continue;
 
-        const mark = parseFloat(market.mark_price ?? market.last_price ?? '0');
+        const mark = parseFloat(market.mark_price ?? market.mp ?? market.last_price ?? '0');
         if (mark <= 0) continue;
 
         this.emitPrice({
@@ -159,7 +169,7 @@ export class ExtendedAdapter extends BaseExchangeAdapter {
           source: 'rest',
         });
       }
-      this.log.info('REST snapshot loaded');
+      this.log.info({ count: markets.length }, 'REST snapshot loaded');
     } catch (err) {
       this.log.error({ err }, 'REST snapshot failed');
     }
