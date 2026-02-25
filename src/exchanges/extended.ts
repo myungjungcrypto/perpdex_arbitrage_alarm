@@ -144,27 +144,33 @@ export class ExtendedAdapter extends BaseExchangeAdapter {
 
   private async fetchRestSnapshot() {
     try {
-      // Extended REST: /api/v1/info/markets
+      // Extended REST: GET /api/v1/info/markets
+      // Response: { status, data: [{ name: "BTC-USD", marketStats: { markPrice, bidPrice, askPrice, ... } }] }
       const res = await fetch(`${this.restUrl}/info/markets`, {
         headers: { 'User-Agent': USER_AGENT },
       });
-      const data = await res.json() as any;
+      const json = await res.json() as any;
       const now = Date.now();
-      const markets = Array.isArray(data) ? data : (data?.markets ?? []);
+      const markets = json?.data ?? (Array.isArray(json) ? json : (json?.markets ?? []));
 
       for (const market of markets) {
-        const sym = market.m ?? market.market ?? market.symbol ?? '';
+        const sym = market.name ?? market.m ?? market.market ?? market.symbol ?? '';
         const canonical = this.canonicalByExSymbol.get(sym);
         if (!canonical) continue;
 
-        const mark = parseFloat(market.mark_price ?? market.mp ?? market.last_price ?? '0');
+        // Prices are in marketStats sub-object
+        const stats = market.marketStats ?? market;
+        const mark = parseFloat(stats.markPrice ?? stats.mark_price ?? stats.lastPrice ?? stats.last_price ?? '0');
         if (mark <= 0) continue;
+
+        const bid = parseFloat(stats.bidPrice ?? stats.bid_price ?? String(mark));
+        const ask = parseFloat(stats.askPrice ?? stats.ask_price ?? String(mark));
 
         this.emitPrice({
           exchange: this.name,
           pair: canonical,
-          bid: mark,
-          ask: mark,
+          bid: isNaN(bid) ? mark : bid,
+          ask: isNaN(ask) ? mark : ask,
           mid: mark,
           timestamp: now,
           source: 'rest',
