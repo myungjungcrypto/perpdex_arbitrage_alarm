@@ -4,13 +4,15 @@ import { registerAdapter } from './registry.js';
 import type { ExchangeConfig, PriceData } from '../types.js';
 
 // Nado: wss://gateway.prod.nado.xyz/v1/subscribe
-// Requires header: Sec-WebSocket-Extensions: permessage-deflate
-// Channels: best_bid_offer (event-driven), book_depth (~50ms batched)
-// Pair format: "BTC-PERP", "ETH-PERP", "SOL-PERP", "BNB-PERP"
+// Uses numeric product_id (NOT string market names)
+// Prices are in x18 format (multiply by 1e18): e.g., $20,000 = 20000 * 1e18
+// Subscribe format: { method: "subscribe", stream: { type: "best_bid_offer", product_id: N }, id: N }
+// BBO event: { type: "best_bid_offer", product_id, bid_price, bid_qty, ask_price, ask_qty, timestamp }
 
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 30000;
-const PING_INTERVAL_MS = 25000; // Nado expects ping every 30s
+const PING_INTERVAL_MS = 25000;
+const X18 = 1e18;
 
 export class NadoAdapter extends BaseExchangeAdapter {
   private ws: WebSocket | null = null;
@@ -20,7 +22,12 @@ export class NadoAdapter extends BaseExchangeAdapter {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private shouldReconnect = true;
-  private canonicalByExSymbol = new Map<string, string>();
+  private subId = 0;
+
+  // product_id -> canonical pair name
+  private productIdToCanonical = new Map<number, string>();
+  // canonical -> product_id
+  private canonicalToProductId = new Map<string, number>();
 
   constructor(config: ExchangeConfig) {
     super('nado');
@@ -29,19 +36,24 @@ export class NadoAdapter extends BaseExchangeAdapter {
   }
 
   mapPairToExchange(canonical: string): string {
-    // Nado uses same format: "BTC-PERP"
     return canonical;
   }
 
   mapPairFromExchange(exSymbol: string): string | undefined {
-    return this.canonicalByExSymbol.get(exSymbol);
+    return exSymbol; // Not used, we use product_id
   }
 
   async connect(pairs: string[]): Promise<void> {
     this.buildPairMappings(pairs);
-    this.canonicalByExSymbol.clear();
-    for (const c of pairs) this.canonicalByExSymbol.set(this.mapPairToExchange(c), c);
     this.shouldReconnect = true;
+
+    // First fetch product list to get product_id -> symbol mapping
+    await this.fetchProducts();
+
+    if (this.productIdToCanonical.size === 0) {
+      this.log.warn('No product IDs mapped, will still try to connect');
+    }
+
     await this.connectWs();
   }
 
@@ -50,6 +62,57 @@ export class NadoAdapter extends BaseExchangeAdapter {
     this.clearTimers();
     if (this.ws) { this.ws.close(1000); this.ws = null; }
     this.setConnected(false);
+  }
+
+  private async fetchProducts() {
+    try {
+      const res = await fetch(`${this.restUrl}/query?type=all_products`);
+      const data = await res.json() as any;
+      this.log.debug({ keys: data ? Object.keys(data) : [] }, 'Products response');
+
+      // Parse perp products
+      const perpProducts = data?.perp_products ?? data?.perpProducts ?? [];
+      const spotProducts = data?.spot_products ?? data?.spotProducts ?? [];
+      const allProducts = [...perpProducts, ...spotProducts];
+
+      for (const product of allProducts) {
+        const productId = product.product_id ?? product.productId;
+        if (productId === undefined) continue;
+
+        // Extract symbol from config or directly
+        const symbol = product.symbol ?? product.config?.symbol ?? product.name ?? '';
+        const pid = Number(productId);
+
+        // Try to match to our canonical pairs
+        // Nado symbols might be: "BTC", "ETH", "SOL", "BNB", "HYPE"
+        // Or: "BTC-PERP", "wBTC"
+        const canonical = this.findCanonical(symbol);
+        if (canonical) {
+          this.productIdToCanonical.set(pid, canonical);
+          this.canonicalToProductId.set(canonical, pid);
+        }
+      }
+
+      this.log.info({
+        mapped: this.productIdToCanonical.size,
+        mappings: Object.fromEntries(this.productIdToCanonical),
+        totalProducts: allProducts.length,
+      }, 'Products fetched');
+    } catch (err) {
+      this.log.error({ err }, 'Failed to fetch products');
+    }
+  }
+
+  private findCanonical(symbol: string): string | undefined {
+    // Direct match: "BTC-PERP" -> "BTC-PERP"
+    if (this.pairs.includes(symbol)) return symbol;
+
+    // Base match: "BTC" or "wBTC" -> "BTC-PERP"
+    const base = symbol.replace(/^w/, '').toUpperCase(); // strip "w" prefix
+    const canonical = `${base}-PERP`;
+    if (this.pairs.includes(canonical)) return canonical;
+
+    return undefined;
   }
 
   private connectWs(): Promise<void> {
@@ -95,36 +158,54 @@ export class NadoAdapter extends BaseExchangeAdapter {
   private subscribe() {
     if (!this.ws) return;
 
-    for (const canonical of this.pairs) {
-      const market = this.mapPairToExchange(canonical);
-      // Subscribe to best_bid_offer (fires on change, no throttling)
+    // Subscribe to each product's best_bid_offer
+    for (const [productId, canonical] of this.productIdToCanonical) {
       this.ws.send(JSON.stringify({
         method: 'subscribe',
-        params: { channel: 'best_bid_offer', market },
+        stream: {
+          type: 'best_bid_offer',
+          product_id: productId,
+        },
+        id: ++this.subId,
       }));
+      this.log.debug({ productId, canonical }, 'Subscribing to BBO');
     }
-    this.log.info({ count: this.pairs.length }, 'Subscribed to best_bid_offer');
+
+    this.log.info({ count: this.productIdToCanonical.size }, 'Subscribed to best_bid_offer');
   }
 
   private handleMessage(msg: any) {
     const now = Date.now();
 
-    this.log.debug({ channel: msg.channel ?? msg.type, keys: Object.keys(msg) }, 'WS message received');
+    // Subscription response
+    if (msg.id && msg.result !== undefined) {
+      this.log.debug({ id: msg.id, result: msg.result }, 'Subscription response');
+      return;
+    }
 
-    if (msg.channel === 'best_bid_offer' || msg.type === 'best_bid_offer') {
-      this.handleBbo(msg.data ?? msg, now);
+    if (msg.error) {
+      this.log.warn({ error: msg.error }, 'Subscription error');
+      return;
+    }
+
+    // BBO event
+    if (msg.type === 'best_bid_offer') {
+      this.handleBbo(msg, now);
     }
   }
 
   private handleBbo(data: any, now: number) {
-    const market = data.market ?? data.symbol;
-    if (!market) return;
-    const canonical = this.canonicalByExSymbol.get(market);
+    const productId = data.product_id ?? data.productId;
+    if (productId === undefined) return;
+
+    const canonical = this.productIdToCanonical.get(Number(productId));
     if (!canonical) return;
 
-    const bid = parseFloat(data.best_bid_price ?? data.bid ?? '0');
-    const ask = parseFloat(data.best_ask_price ?? data.ask ?? '0');
-    if (!bid || !ask) return;
+    // Prices are in x18 format
+    const bid = this.parseX18(data.bid_price ?? data.bidPrice ?? '0');
+    const ask = this.parseX18(data.ask_price ?? data.askPrice ?? '0');
+
+    if (bid <= 0 || ask <= 0) return;
 
     this.emitPrice({
       exchange: this.name,
@@ -135,6 +216,12 @@ export class NadoAdapter extends BaseExchangeAdapter {
       timestamp: now,
       source: 'ws',
     });
+  }
+
+  private parseX18(value: string | number): number {
+    const raw = typeof value === 'string' ? parseFloat(value) : value;
+    if (isNaN(raw) || raw === 0) return 0;
+    return raw / X18;
   }
 
   private startPing() {

@@ -118,11 +118,12 @@ export class ExtendedAdapter extends BaseExchangeAdapter {
   private handleOrderBook(canonical: string, msg: any) {
     const now = Date.now();
 
-    // Extended uses short field names: b (bids), a (asks)
-    // Each entry: { p: "price", q: "quantity", c: count }
-    // Also handle full field names as fallback
-    const bids = msg.b ?? msg.bids ?? [];
-    const asks = msg.a ?? msg.asks ?? [];
+    // Extended WS format: { ts, type: "SNAPSHOT", data: { m: "BTC-USD", b: [{p, q, c}], a: [{p, q, c}] }, seq }
+    // Data can be at msg.data level (wrapped) or top level
+    const ob = msg.data ?? msg;
+
+    const bids = ob.b ?? ob.bids ?? [];
+    const asks = ob.a ?? ob.asks ?? [];
 
     if (bids.length > 0 && asks.length > 0) {
       const bid = parseFloat(bids[0].p ?? bids[0].price ?? bids[0][0] ?? '0');

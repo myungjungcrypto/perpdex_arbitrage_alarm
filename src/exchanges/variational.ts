@@ -56,16 +56,20 @@ export class VariationalAdapter extends BaseExchangeAdapter {
       const data = await res.json() as any;
       const now = Date.now();
 
-      // Log response structure on first poll for debugging
-      const items = Array.isArray(data) ? data : (data?.results ?? data?.data ?? []);
+      // Response format: { listings: [{ ticker, mark_price, quotes: { size_1k: { bid, ask } } }], ... }
+      const items = data?.listings ?? data?.results ?? (Array.isArray(data) ? data : []);
+
       if (items.length > 0) {
         this.log.debug({
           sampleKeys: Object.keys(items[0]),
-          sampleTicker: items[0].ticker ?? items[0].symbol ?? items[0].market,
+          sampleTicker: items[0].ticker ?? items[0].symbol,
           count: items.length,
         }, 'Poll response sample');
       } else {
-        this.log.debug({ responseType: typeof data, keys: data ? Object.keys(data) : [] }, 'Poll response empty or unexpected format');
+        this.log.debug({
+          responseType: typeof data,
+          keys: data ? Object.keys(data) : [],
+        }, 'Poll response - no listings found');
       }
 
       for (const item of items) {
@@ -76,9 +80,10 @@ export class VariationalAdapter extends BaseExchangeAdapter {
         const mark = parseFloat(item.mark_price ?? '0');
         if (mark <= 0) continue;
 
-        // Variational provides bid/ask at various sizes
-        const bid = parseFloat(item.bid_price ?? item.bid ?? String(mark));
-        const ask = parseFloat(item.ask_price ?? item.ask ?? String(mark));
+        // Bid/ask from quotes.size_1k (smallest trade size tier)
+        const quotes = item.quotes?.size_1k ?? item.quotes?.['size_1k'] ?? {};
+        const bid = parseFloat(quotes.bid ?? item.bid_price ?? item.bid ?? String(mark));
+        const ask = parseFloat(quotes.ask ?? item.ask_price ?? item.ask ?? String(mark));
 
         this.emitPrice({
           exchange: this.name,
@@ -97,15 +102,21 @@ export class VariationalAdapter extends BaseExchangeAdapter {
   }
 
   private findCanonical(ticker: string): string | undefined {
-    // Try direct match first
-    let canonical = this.canonicalByExSymbol.get(ticker);
-    if (canonical) return canonical;
+    if (!ticker) return undefined;
 
-    // Try normalized: "BTC-USD-PERP" -> "BTC-PERP", etc.
-    const base = ticker.split('-')[0]?.toUpperCase();
+    // Try direct match: "BTC-PERP" -> "BTC-PERP"
+    if (this.pairs.includes(ticker)) return ticker;
+
+    // Variational uses short tickers: "BTC" -> "BTC-PERP"
+    const upper = ticker.toUpperCase().trim();
+    const canonical = `${upper}-PERP`;
+    if (this.pairs.includes(canonical)) return canonical;
+
+    // Try splitting compound names: "BTC-USD-PERP" -> "BTC-PERP"
+    const base = upper.split('-')[0];
     if (base) {
-      canonical = this.canonicalByExSymbol.get(`${base}-PERP`);
-      if (canonical) return canonical;
+      const fromBase = `${base}-PERP`;
+      if (this.pairs.includes(fromBase)) return fromBase;
     }
 
     return undefined;
