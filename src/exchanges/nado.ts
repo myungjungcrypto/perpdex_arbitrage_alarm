@@ -91,6 +91,8 @@ export class NadoAdapter extends BaseExchangeAdapter {
         }, 'Sample product');
       }
 
+      // Collect all symbols for debugging
+      const allSymbols: string[] = [];
       for (const product of allProducts) {
         const productId = product.product_id ?? product.productId;
         if (productId === undefined) continue;
@@ -98,20 +100,27 @@ export class NadoAdapter extends BaseExchangeAdapter {
         // Symbol is in config.symbol (from SDK docs) or at top level
         const symbol = product.config?.symbol ?? product.symbol ?? product.config?.ticker ?? product.name ?? '';
         const pid = Number(productId);
+        allSymbols.push(`${pid}:${symbol || '(empty)'}`);
 
         // Try to match to our canonical pairs
         const canonical = this.findCanonical(symbol);
         if (canonical) {
           this.productIdToCanonical.set(pid, canonical);
           this.canonicalToProductId.set(canonical, pid);
-          this.log.debug({ pid, symbol, canonical }, 'Product mapped');
         }
       }
+
+      // Log first 3 products raw structure
+      const sampleProducts = allProducts.slice(0, 3).map((p: any) => JSON.stringify(p).slice(0, 400));
 
       this.log.info({
         mapped: this.productIdToCanonical.size,
         mappings: Object.fromEntries(this.productIdToCanonical),
         totalProducts: allProducts.length,
+        allSymbols: allSymbols.join(', '),
+        sampleRaw: sampleProducts,
+        perpCount: (inner?.perp_products ?? inner?.perpProducts ?? []).length,
+        spotCount: (inner?.spot_products ?? inner?.spotProducts ?? []).length,
       }, 'Products fetched');
     } catch (err) {
       this.log.error({ err }, 'Failed to fetch products');
