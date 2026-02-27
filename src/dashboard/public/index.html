@@ -18,29 +18,27 @@
     <div id="exchange-statuses"></div>
   </section>
 
-  <!-- Controls -->
-  <section id="controls">
-    <input type="text" id="filter-pair" placeholder="Filter pair (e.g. BTC)" />
-    <input type="text" id="filter-exchange" placeholder="Filter exchange" />
-    <label>
-      Min spread %:
-      <input type="number" id="filter-min-spread" value="0" step="0.01" min="0" />
-    </label>
-    <label>
-      Sort by:
-      <select id="sort-by">
-        <option value="spreadPct">Spread %</option>
-        <option value="pair">Pair</option>
-        <option value="spreadAbs">Spread $</option>
-        <option value="timestamp">Time</option>
-      </select>
-    </label>
-    <span id="stats"></span>
-  </section>
-
-  <!-- Spread table -->
+  <!-- ═══ Real-time Spreads (fast exchanges) ═══ -->
   <section id="spread-section">
-    <div class="section-title">Spreads</div>
+    <div class="section-title">Real-time Spreads</div>
+    <div class="controls-row">
+      <input type="text" id="filter-pair" placeholder="Filter pair (e.g. BTC)" />
+      <input type="text" id="filter-exchange" placeholder="Filter exchange" />
+      <label>
+        Min spread %:
+        <input type="number" id="filter-min-spread" value="0" step="0.01" min="0" />
+      </label>
+      <label>
+        Sort by:
+        <select id="sort-by">
+          <option value="spreadPct">Spread %</option>
+          <option value="pair">Pair</option>
+          <option value="spreadAbs">Spread $</option>
+          <option value="timestamp">Time</option>
+        </select>
+      </label>
+      <span id="stats-fast" class="stats-inline"></span>
+    </div>
     <div id="spread-table-wrap">
       <table id="spread-table">
         <thead>
@@ -56,6 +54,45 @@
           </tr>
         </thead>
         <tbody id="spread-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ═══ Slow Exchange Spreads (vs market average) ═══ -->
+  <section id="slow-spread-section">
+    <div class="section-title">Slow Exchange vs Market Average</div>
+    <div class="controls-row">
+      <input type="text" id="slow-filter-pair" placeholder="Filter pair (e.g. BTC)" />
+      <label>
+        Min spread %:
+        <input type="number" id="slow-filter-min-spread" value="0" step="0.1" min="0" />
+      </label>
+      <label>
+        Sort by:
+        <select id="slow-sort-by">
+          <option value="spreadPct">Spread %</option>
+          <option value="pair">Pair</option>
+          <option value="spreadAbs">Spread $</option>
+          <option value="timestamp">Time</option>
+        </select>
+      </label>
+      <span id="stats-slow" class="stats-inline"></span>
+    </div>
+    <div id="slow-spread-table-wrap">
+      <table id="slow-spread-table">
+        <thead>
+          <tr>
+            <th>Pair</th>
+            <th>Slow Exchange</th>
+            <th>Price</th>
+            <th>Market Avg</th>
+            <th>Price</th>
+            <th>Spread $</th>
+            <th>Spread %</th>
+            <th>Age</th>
+          </tr>
+        </thead>
+        <tbody id="slow-spread-body"></tbody>
       </table>
     </div>
   </section>

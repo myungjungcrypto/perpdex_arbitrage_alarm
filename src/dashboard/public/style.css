@@ -94,17 +94,17 @@ section {
 }
 
 /* Controls */
-#controls {
+.controls-row {
   display: flex;
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-  padding: 10px 0;
+  padding: 8px 0;
 }
 
-#controls input[type="text"],
-#controls input[type="number"],
-#controls select {
+.controls-row input[type="text"],
+.controls-row input[type="number"],
+.controls-row select {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -114,13 +114,13 @@ section {
   outline: none;
 }
 
-#controls input[type="text"]:focus,
-#controls input[type="number"]:focus,
-#controls select:focus {
+.controls-row input[type="text"]:focus,
+.controls-row input[type="number"]:focus,
+.controls-row select:focus {
   border-color: var(--accent);
 }
 
-#controls label {
+.controls-row label {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -128,7 +128,7 @@ section {
   font-size: 12px;
 }
 
-#stats {
+.stats-inline {
   margin-left: auto;
   color: var(--text-dim);
   font-size: 11px;
@@ -136,12 +136,22 @@ section {
 
 /* Tables */
 #spread-table-wrap,
+#slow-spread-table-wrap,
 #price-table-wrap {
   overflow-x: auto;
   max-height: 500px;
   overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: 6px;
+}
+
+/* Slow exchange section accent */
+#slow-spread-section {
+  border-left: 3px solid var(--blue);
+  padding-left: 17px;
+}
+#slow-spread-section .section-title {
+  color: var(--blue);
 }
 
 table {
@@ -244,6 +254,6 @@ tr:hover td {
 /* Responsive */
 @media (max-width: 768px) {
   section { margin: 8px 10px; }
-  #controls { flex-direction: column; align-items: stretch; }
-  #stats { margin-left: 0; }
+  .controls-row { flex-direction: column; align-items: stretch; }
+  .stats-inline { margin-left: 0; }
 }

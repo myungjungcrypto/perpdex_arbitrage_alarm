@@ -21,15 +21,26 @@
   const $ = (sel) => document.querySelector(sel);
   const connStatus = $('#connection-status');
   const exchangeStatusesEl = $('#exchange-statuses');
+
+  // Fast spread table
   const spreadBody = $('#spread-body');
-  const priceHead = $('#price-head');
-  const priceBody = $('#price-body');
-  const alertLog = $('#alert-log');
   const filterPair = $('#filter-pair');
   const filterExchange = $('#filter-exchange');
   const filterMinSpread = $('#filter-min-spread');
   const sortBy = $('#sort-by');
-  const statsEl = $('#stats');
+  const statsFast = $('#stats-fast');
+
+  // Slow spread table
+  const slowSpreadBody = $('#slow-spread-body');
+  const slowFilterPair = $('#slow-filter-pair');
+  const slowFilterMinSpread = $('#slow-filter-min-spread');
+  const slowSortBy = $('#slow-sort-by');
+  const statsSlow = $('#stats-slow');
+
+  // Price table
+  const priceHead = $('#price-head');
+  const priceBody = $('#price-body');
+  const alertLog = $('#alert-log');
 
   // ── WebSocket ──
   function connect() {
@@ -75,7 +86,6 @@
   // ── Message handling ──
   function handleMessage(msg) {
     if (msg.type === 'snapshot') {
-      // Full reset
       state.prices.clear();
       state.spreads.clear();
       state.statuses.clear();
@@ -120,9 +130,9 @@
   // ── Render ──
   function render() {
     renderExchangeStatuses();
-    renderSpreadTable();
+    renderFastSpreadTable();
+    renderSlowSpreadTable();
     renderPriceTable();
-    renderStats();
   }
 
   function renderExchangeStatuses() {
@@ -137,15 +147,15 @@
     }).join('');
   }
 
-  function renderSpreadTable() {
+  // ── Fast exchange spreads (pairwise) ──
+  function renderFastSpreadTable() {
     const pairFilter = filterPair.value.toUpperCase();
     const exFilter = filterExchange.value.toLowerCase();
     const minSpread = parseFloat(filterMinSpread.value) || 0;
     const sort = sortBy.value;
 
-    let spreads = Array.from(state.spreads.values());
+    let spreads = Array.from(state.spreads.values()).filter((s) => !s.isSlowSpread);
 
-    // Filter
     if (pairFilter) {
       spreads = spreads.filter((s) => s.pair.includes(pairFilter));
     }
@@ -159,36 +169,72 @@
       spreads = spreads.filter((s) => Math.abs(s.spreadPct) >= minSpread);
     }
 
-    // Sort
-    spreads.sort((a, b) => {
-      switch (sort) {
-        case 'spreadPct': return Math.abs(b.spreadPct) - Math.abs(a.spreadPct);
-        case 'spreadAbs': return Math.abs(b.spreadAbs) - Math.abs(a.spreadAbs);
-        case 'pair': return a.pair.localeCompare(b.pair);
-        case 'timestamp': return b.timestamp - a.timestamp;
-        default: return 0;
-      }
-    });
+    spreads.sort((a, b) => sortSpreads(a, b, sort));
 
-    // Limit display to top 200 for performance
     const display = spreads.slice(0, 200);
     const now = Date.now();
 
+    statsFast.textContent = `${spreads.length} spreads`;
+
     spreadBody.innerHTML = display.map((s) => {
-      const isSlow = !!s.isSlowSpread;
       const pctClass = s.spreadPct >= 0.5 ? 'spread-high' :
                         s.spreadPct > 0 ? 'spread-positive' : 'spread-negative';
-      const rowClass = isSlow ? 'spread-slow' : '';
-      const slowTag = isSlow ? '<span class="slow-tag">vs AVG</span>' : '';
       const age = formatAge(now - s.timestamp);
-      return `<tr class="${rowClass}">
-        <td><strong>${s.pair}</strong>${slowTag}</td>
+      return `<tr>
+        <td><strong>${s.pair}</strong></td>
         <td>${s.longExchange}</td>
         <td class="num price-ask">$${fmt(s.longAsk)}</td>
         <td>${s.shortExchange}</td>
         <td class="num price-bid">$${fmt(s.shortBid)}</td>
         <td class="num ${pctClass}">$${fmt(s.spreadAbs)}</td>
         <td class="num ${pctClass}">${s.spreadPct.toFixed(4)}%</td>
+        <td class="num">${age}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  // ── Slow exchange spreads (vs market average) ──
+  function renderSlowSpreadTable() {
+    const pairFilter = slowFilterPair.value.toUpperCase();
+    const minSpread = parseFloat(slowFilterMinSpread.value) || 0;
+    const sort = slowSortBy.value;
+
+    let spreads = Array.from(state.spreads.values()).filter((s) => !!s.isSlowSpread);
+
+    if (pairFilter) {
+      spreads = spreads.filter((s) => s.pair.includes(pairFilter));
+    }
+    if (minSpread > 0) {
+      spreads = spreads.filter((s) => Math.abs(s.spreadPct) >= minSpread);
+    }
+
+    spreads.sort((a, b) => sortSpreads(a, b, sort));
+
+    const now = Date.now();
+
+    statsSlow.textContent = `${spreads.length} pairs`;
+
+    slowSpreadBody.innerHTML = spreads.map((s) => {
+      const pctClass = Math.abs(s.spreadPct) >= 1.0 ? 'spread-high' :
+                        Math.abs(s.spreadPct) >= 0.5 ? 'spread-positive' : '';
+      const age = formatAge(now - s.timestamp);
+
+      // Determine which side is the slow exchange and which is market-avg
+      const isSlowLong = s.longExchange !== 'market-avg';
+      const slowEx = isSlowLong ? s.longExchange : s.shortExchange;
+      const slowPrice = isSlowLong ? s.longAsk : s.shortBid;
+      const avgPrice = isSlowLong ? s.shortBid : s.longAsk;
+      const direction = isSlowLong ? 'LOW' : 'HIGH';
+      const dirClass = isSlowLong ? 'price-bid' : 'price-ask';
+
+      return `<tr>
+        <td><strong>${s.pair}</strong></td>
+        <td>${slowEx} <span class="slow-tag">${direction}</span></td>
+        <td class="num">$${fmt(slowPrice)}</td>
+        <td>market-avg</td>
+        <td class="num">$${fmt(avgPrice)}</td>
+        <td class="num ${pctClass}">$${fmt(Math.abs(s.spreadAbs))}</td>
+        <td class="num ${pctClass}">${Math.abs(s.spreadPct).toFixed(4)}%</td>
         <td class="num">${age}</td>
       </tr>`;
     }).join('');
@@ -203,10 +249,8 @@
       pairs = pairs.filter((p) => p.includes(pairFilter));
     }
 
-    // Limit to 100 pairs for price table
     pairs = pairs.slice(0, 100);
 
-    // Header
     priceHead.innerHTML = `<tr>
       <th>Pair</th>
       ${exchanges.map((e) => `<th>${e}<br><span style="font-weight:normal;font-size:10px">bid / ask</span></th>`).join('')}
@@ -214,7 +258,6 @@
 
     const now = Date.now();
 
-    // Body
     priceBody.innerHTML = pairs.map((pair) => {
       const cells = exchanges.map((ex) => {
         const key = `${pair}:${ex}`;
@@ -232,11 +275,17 @@
     }).join('');
   }
 
-  function renderStats() {
-    statsEl.textContent = `${state.prices.size} prices | ${state.spreads.size} spreads | ${state.exchanges.size} exchanges | ${state.pairs.size} pairs`;
+  // ── Utils ──
+  function sortSpreads(a, b, sort) {
+    switch (sort) {
+      case 'spreadPct': return Math.abs(b.spreadPct) - Math.abs(a.spreadPct);
+      case 'spreadAbs': return Math.abs(b.spreadAbs) - Math.abs(a.spreadAbs);
+      case 'pair': return a.pair.localeCompare(b.pair);
+      case 'timestamp': return b.timestamp - a.timestamp;
+      default: return 0;
+    }
   }
 
-  // ── Utils ──
   function fmt(num) {
     if (num === undefined || num === null) return '-';
     if (num >= 1000) return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -257,6 +306,10 @@
   filterExchange.addEventListener('input', scheduleRender);
   filterMinSpread.addEventListener('input', scheduleRender);
   sortBy.addEventListener('change', scheduleRender);
+
+  slowFilterPair.addEventListener('input', scheduleRender);
+  slowFilterMinSpread.addEventListener('input', scheduleRender);
+  slowSortBy.addEventListener('change', scheduleRender);
 
   // ── Init ──
   connect();
