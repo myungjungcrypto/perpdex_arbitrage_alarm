@@ -102,8 +102,13 @@ export class ExtendedAdapter extends BaseExchangeAdapter {
           const delay = Math.min(RECONNECT_BASE_MS * 2 ** (attempts - 1), RECONNECT_MAX_MS);
           this.log.warn({ pair: canonical, code, attempt: attempts, nextRetryMs: delay }, 'Stream closed, retrying');
           setTimeout(() => this.connectPairWs(canonical).catch(() => {}), delay);
-        } else if (attempts > MAX_RECONNECT_ATTEMPTS) {
-          this.log.error({ pair: canonical, attempts }, 'Max reconnect attempts reached, giving up');
+        } else if (this.shouldReconnect && attempts > MAX_RECONNECT_ATTEMPTS) {
+          // Reset and try again after a longer delay (2 minutes)
+          this.log.warn({ pair: canonical, attempts }, 'Max reconnect attempts reached, will retry after cooldown');
+          setTimeout(() => {
+            this.pairReconnectAttempts.set(canonical, 0);
+            this.connectPairWs(canonical).catch(() => {});
+          }, 120000);
         }
         if (this.connections.size === 0) this.setConnected(false);
       });

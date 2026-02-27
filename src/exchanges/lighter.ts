@@ -238,8 +238,7 @@ export class LighterAdapter extends BaseExchangeAdapter {
     for (const [index, canonical] of this.marketIndexMap) {
       this.ws.send(JSON.stringify({
         type: 'subscribe',
-        channel: 'order_book',
-        order_book_index: index,
+        channel: `order_book/${index}`,
       }));
       this.log.debug({ index, canonical }, 'Subscribing to order_book');
     }
@@ -248,9 +247,10 @@ export class LighterAdapter extends BaseExchangeAdapter {
 
   private handleMessage(msg: any) {
     const now = Date.now();
+    this.lastMessageAt = now;
 
     // Lighter WS format: { channel: "order_book:0", type: "update/order_book",
-    //   order_book: { asks: [{price, size}], bids: [{price, size}] }, timestamp }
+    //   order_book: { code, asks: [{price, size}], bids: [{price, size}] }, timestamp }
     const channel = msg.channel as string | undefined;
 
     if (channel?.startsWith('order_book:')) {

@@ -66,30 +66,43 @@ export class NadoAdapter extends BaseExchangeAdapter {
 
   private async fetchProducts() {
     try {
-      const res = await fetch(`${this.restUrl}/query?type=all_products`);
+      const res = await fetch(`${this.restUrl}/query?type=all_products`, {
+        headers: { 'Accept-Encoding': 'gzip, br, deflate' },
+      });
       const data = await res.json() as any;
-      this.log.debug({ keys: data ? Object.keys(data) : [] }, 'Products response');
+      this.log.debug({ keys: data ? Object.keys(data) : [] }, 'Products response top-level');
 
-      // Parse perp products
-      const perpProducts = data?.perp_products ?? data?.perpProducts ?? [];
-      const spotProducts = data?.spot_products ?? data?.spotProducts ?? [];
+      // Response may be wrapped: { data: { perp_products: [...], spot_products: [...] } }
+      // Or directly: { perp_products: [...], spot_products: [...] }
+      const inner = data?.data ?? data;
+      this.log.debug({ innerKeys: inner ? Object.keys(inner) : [] }, 'Products response inner');
+
+      const perpProducts = inner?.perp_products ?? inner?.perpProducts ?? [];
+      const spotProducts = inner?.spot_products ?? inner?.spotProducts ?? [];
       const allProducts = [...perpProducts, ...spotProducts];
+
+      if (allProducts.length > 0) {
+        this.log.debug({
+          sampleKeys: Object.keys(allProducts[0]),
+          sampleConfigKeys: allProducts[0].config ? Object.keys(allProducts[0].config) : [],
+          sampleProductId: allProducts[0].product_id ?? allProducts[0].productId,
+        }, 'Sample product structure');
+      }
 
       for (const product of allProducts) {
         const productId = product.product_id ?? product.productId;
         if (productId === undefined) continue;
 
-        // Extract symbol from config or directly
-        const symbol = product.symbol ?? product.config?.symbol ?? product.name ?? '';
+        // Symbol is in config.symbol (from SDK docs) or at top level
+        const symbol = product.config?.symbol ?? product.symbol ?? product.config?.ticker ?? product.name ?? '';
         const pid = Number(productId);
 
         // Try to match to our canonical pairs
-        // Nado symbols might be: "BTC", "ETH", "SOL", "BNB", "HYPE"
-        // Or: "BTC-PERP", "wBTC"
         const canonical = this.findCanonical(symbol);
         if (canonical) {
           this.productIdToCanonical.set(pid, canonical);
           this.canonicalToProductId.set(canonical, pid);
+          this.log.debug({ pid, symbol, canonical }, 'Product mapped');
         }
       }
 
@@ -104,13 +117,29 @@ export class NadoAdapter extends BaseExchangeAdapter {
   }
 
   private findCanonical(symbol: string): string | undefined {
+    if (!symbol) return undefined;
+
     // Direct match: "BTC-PERP" -> "BTC-PERP"
     if (this.pairs.includes(symbol)) return symbol;
 
+    const upper = symbol.toUpperCase().trim();
+
     // Base match: "BTC" or "wBTC" -> "BTC-PERP"
-    const base = symbol.replace(/^w/, '').toUpperCase(); // strip "w" prefix
+    const base = upper.replace(/^W/, ''); // strip "w" prefix
     const canonical = `${base}-PERP`;
     if (this.pairs.includes(canonical)) return canonical;
+
+    // Strip suffixes: "BTC-USD", "BTC-USDT", "BTC-USDC" -> "BTC-PERP"
+    const stripped = upper.replace(/[-_](USD[TC]?|PERP)$/i, '');
+    const fromStripped = `${stripped}-PERP`;
+    if (this.pairs.includes(fromStripped)) return fromStripped;
+
+    // Handle compound names like "BTCUSD" -> "BTC-PERP"
+    const noSuffix = upper.replace(/USD[TC]?$/, '');
+    if (noSuffix && noSuffix !== upper) {
+      const fromNoSuffix = `${noSuffix}-PERP`;
+      if (this.pairs.includes(fromNoSuffix)) return fromNoSuffix;
+    }
 
     return undefined;
   }
@@ -176,6 +205,7 @@ export class NadoAdapter extends BaseExchangeAdapter {
 
   private handleMessage(msg: any) {
     const now = Date.now();
+    this.lastMessageAt = now;
 
     // Subscription response
     if (msg.id && msg.result !== undefined) {
@@ -188,9 +218,21 @@ export class NadoAdapter extends BaseExchangeAdapter {
       return;
     }
 
-    // BBO event
+    // BBO event (stream type)
     if (msg.type === 'best_bid_offer') {
       this.handleBbo(msg, now);
+      return;
+    }
+
+    // Events may be wrapped in a stream envelope
+    if (msg.stream?.type === 'best_bid_offer' && msg.data) {
+      this.handleBbo(msg.data, now);
+      return;
+    }
+
+    // Log unknown message types for debugging
+    if (msg.type && msg.type !== 'pong') {
+      this.log.debug({ type: msg.type, keys: Object.keys(msg) }, 'Unknown message type');
     }
   }
 
@@ -219,9 +261,38 @@ export class NadoAdapter extends BaseExchangeAdapter {
   }
 
   private parseX18(value: string | number): number {
-    const raw = typeof value === 'string' ? parseFloat(value) : value;
-    if (isNaN(raw) || raw === 0) return 0;
-    return raw / X18;
+    if (value === undefined || value === null) return 0;
+
+    // For string values, try BigInt approach for precision with very large integers
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed || trimmed === '0') return 0;
+
+      // If it contains a decimal point, parse as float first
+      if (trimmed.includes('.') || trimmed.includes('e') || trimmed.includes('E')) {
+        const raw = parseFloat(trimmed);
+        if (isNaN(raw) || raw === 0) return 0;
+        return raw / X18;
+      }
+
+      // Pure integer string - use BigInt for precision
+      try {
+        const bi = BigInt(trimmed);
+        if (bi === 0n) return 0;
+        // Convert: integer part and remainder
+        const intPart = bi / BigInt('1000000000000000000');
+        const remainder = bi % BigInt('1000000000000000000');
+        return Number(intPart) + Number(remainder) / X18;
+      } catch {
+        const raw = parseFloat(trimmed);
+        if (isNaN(raw) || raw === 0) return 0;
+        return raw / X18;
+      }
+    }
+
+    // Number type
+    if (isNaN(value) || value === 0) return 0;
+    return value / X18;
   }
 
   private startPing() {
