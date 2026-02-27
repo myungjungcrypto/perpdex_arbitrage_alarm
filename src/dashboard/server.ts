@@ -30,6 +30,7 @@ export class DashboardServer {
   private spreadCalc: SpreadCalculator;
   private adapters: Map<string, BaseExchangeAdapter>;
   private updateIntervalMs: number;
+  private auth?: { username: string; password: string };
 
   // Batch buffer: collect changes between dashboard pushes
   private pendingPrices = new Map<string, PriceData>(); // "pair:exchange" -> latest
@@ -40,11 +41,17 @@ export class DashboardServer {
     spreadCalc: SpreadCalculator,
     adapters: Map<string, BaseExchangeAdapter>,
     updateIntervalMs = 200,
+    auth?: { username: string; password: string },
   ) {
     this.priceStore = priceStore;
     this.spreadCalc = spreadCalc;
     this.adapters = adapters;
     this.updateIntervalMs = updateIntervalMs;
+    this.auth = auth;
+
+    if (this.auth) {
+      log.info('Dashboard Basic Auth enabled');
+    }
 
     // Buffer price and spread updates
     this.priceStore.on('update', (p) => {
@@ -62,7 +69,18 @@ export class DashboardServer {
         this.handleHttp(req, res);
       });
 
-      this.wss = new WebSocketServer({ server });
+      this.wss = new WebSocketServer({
+        server,
+        verifyClient: (info, done) => {
+          if (!this.auth) return done(true);
+          const ok = this.checkAuth(info.req);
+          if (!ok) {
+            done(false, 401, 'Unauthorized');
+          } else {
+            done(true);
+          }
+        },
+      });
 
       this.wss.on('connection', (ws) => {
         this.clients.add(ws);
@@ -91,7 +109,29 @@ export class DashboardServer {
     });
   }
 
+  private checkAuth(req: import('node:http').IncomingMessage): boolean {
+    if (!this.auth) return true;
+    const header = req.headers.authorization ?? '';
+    if (!header.startsWith('Basic ')) return false;
+    const decoded = Buffer.from(header.slice(6), 'base64').toString();
+    const [user, pass] = decoded.split(':');
+    return user === this.auth.username && pass === this.auth.password;
+  }
+
+  private sendUnauthorized(res: import('node:http').ServerResponse) {
+    res.writeHead(401, {
+      'WWW-Authenticate': 'Basic realm="PerpDEX Dashboard"',
+      'Content-Type': 'text/plain',
+    });
+    res.end('Unauthorized');
+  }
+
   private handleHttp(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) {
+    if (!this.checkAuth(req)) {
+      this.sendUnauthorized(res);
+      return;
+    }
+
     // API endpoints
     if (req.url === '/api/snapshot') {
       res.writeHead(200, { 'Content-Type': 'application/json' });

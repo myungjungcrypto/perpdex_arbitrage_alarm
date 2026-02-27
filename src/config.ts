@@ -23,6 +23,12 @@ export function loadConfig(configPath?: string): AppConfig {
   if (process.env.DASHBOARD_PORT) {
     parsed.dashboard.port = parseInt(process.env.DASHBOARD_PORT, 10);
   }
+  if (process.env.DASHBOARD_USER && process.env.DASHBOARD_PASS) {
+    parsed.dashboard.auth = {
+      username: process.env.DASHBOARD_USER,
+      password: process.env.DASHBOARD_PASS,
+    };
+  }
 
   // Ensure defaults
   parsed.thresholds.default ??= { min_spread_pct: 0.3, sustained_ms: 2000, cooldown_ms: 30000 };

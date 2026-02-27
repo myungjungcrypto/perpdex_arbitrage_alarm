@@ -64,6 +64,10 @@ export interface AppConfig {
   dashboard: {
     port: number;
     update_interval_ms: number;
+    auth?: {
+      username: string;
+      password: string;
+    };
   };
   alerts: {
     telegram: {

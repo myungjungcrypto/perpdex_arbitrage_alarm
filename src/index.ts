@@ -64,6 +64,7 @@ async function main() {
     spreadCalc,
     adapters,
     config.dashboard.update_interval_ms,
+    config.dashboard.auth,
   );
   await dashboard.start(config.dashboard.port);
 
