@@ -75,18 +75,20 @@ export class NadoAdapter extends BaseExchangeAdapter {
       // Response may be wrapped: { data: { perp_products: [...], spot_products: [...] } }
       // Or directly: { perp_products: [...], spot_products: [...] }
       const inner = data?.data ?? data;
-      this.log.debug({ innerKeys: inner ? Object.keys(inner) : [] }, 'Products response inner');
+      this.log.info({ topKeys: data ? Object.keys(data) : [], innerKeys: inner ? Object.keys(inner) : [] }, 'Products response structure');
 
       const perpProducts = inner?.perp_products ?? inner?.perpProducts ?? [];
       const spotProducts = inner?.spot_products ?? inner?.spotProducts ?? [];
       const allProducts = [...perpProducts, ...spotProducts];
 
-      if (allProducts.length > 0) {
-        this.log.debug({
-          sampleKeys: Object.keys(allProducts[0]),
-          sampleConfigKeys: allProducts[0].config ? Object.keys(allProducts[0].config) : [],
-          sampleProductId: allProducts[0].product_id ?? allProducts[0].productId,
-        }, 'Sample product structure');
+      // Log first 3 products in full for debugging symbol mapping
+      for (let i = 0; i < Math.min(3, allProducts.length); i++) {
+        this.log.info({
+          index: i,
+          keys: Object.keys(allProducts[i]),
+          configKeys: allProducts[i].config ? Object.keys(allProducts[i].config) : 'no config',
+          product: JSON.stringify(allProducts[i]).slice(0, 500),
+        }, 'Sample product');
       }
 
       for (const product of allProducts) {
