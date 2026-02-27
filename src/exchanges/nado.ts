@@ -82,28 +82,34 @@ export class NadoAdapter extends BaseExchangeAdapter {
       const spotProducts = inner?.spot_products ?? inner?.spotProducts ?? [];
       const allProducts = [...perpProducts, ...spotProducts];
 
-      // Dump first 3 products to file for debugging
-      const debugData = {
-        topKeys: data ? Object.keys(data) : [],
-        innerKeys: inner ? Object.keys(inner) : [],
-        perpCount: perpProducts.length,
-        spotCount: spotProducts.length,
-        first3: allProducts.slice(0, 3),
-      };
-      try { writeFileSync('/tmp/nado_debug.json', JSON.stringify(debugData, null, 2)); } catch {}
+      // Also try query?type=symbols for symbol names
+      let symbolsData: any = null;
+      try {
+        const symRes = await fetch(`${this.restUrl}/query?type=symbols`, {
+          headers: { 'Accept-Encoding': 'gzip, br, deflate' },
+        });
+        symbolsData = await symRes.json();
+      } catch {}
 
-      for (const product of allProducts) {
-        const productId = product.product_id ?? product.productId;
-        if (productId === undefined) continue;
+      // Build product_id -> price map and dump all for debugging
+      const productList = perpProducts.map((p: any) => ({
+        id: p.product_id,
+        price: Number(BigInt(p.oracle_price_x18 ?? '0') / BigInt(10 ** 18)),
+      }));
 
-        const symbol = product.config?.symbol ?? product.symbol ?? product.config?.ticker ?? product.name ?? '';
-        const pid = Number(productId);
+      try {
+        writeFileSync('/tmp/nado_debug.json', JSON.stringify({
+          allPerpProducts: productList,
+          symbolsResponse: symbolsData ? JSON.stringify(symbolsData).slice(0, 2000) : null,
+        }, null, 2));
+      } catch {}
 
-        const canonical = this.findCanonical(symbol);
-        if (canonical) {
-          this.productIdToCanonical.set(pid, canonical);
-          this.canonicalToProductId.set(canonical, pid);
-        }
+      // Map products using symbols endpoint if available, otherwise use price-based heuristics
+      const symbolMap = this.buildSymbolMap(symbolsData, perpProducts);
+
+      for (const [pid, canonical] of symbolMap.entries()) {
+        this.productIdToCanonical.set(pid, canonical);
+        this.canonicalToProductId.set(canonical, pid);
       }
 
       this.log.info({
@@ -142,6 +148,79 @@ export class NadoAdapter extends BaseExchangeAdapter {
     }
 
     return undefined;
+  }
+
+  private buildSymbolMap(symbolsData: any, perpProducts: any[]): Map<number, string> {
+    const result = new Map<number, string>();
+
+    // Try to use symbols endpoint data first
+    if (symbolsData) {
+      const symbols = symbolsData?.data?.symbols ?? symbolsData?.symbols ?? symbolsData?.data ?? symbolsData;
+      if (typeof symbols === 'object' && symbols !== null) {
+        // symbols might be { product_id: symbol_name } or an array
+        const entries = Array.isArray(symbols)
+          ? symbols.map((s: any) => [s.product_id ?? s.productId, s.symbol ?? s.name ?? s.ticker])
+          : Object.entries(symbols);
+
+        for (const [pid, sym] of entries) {
+          if (pid === undefined || sym === undefined) continue;
+          const canonical = this.findCanonical(String(sym));
+          if (canonical) {
+            result.set(Number(pid), canonical);
+          }
+        }
+      }
+
+      if (result.size > 0) {
+        this.log.info({ source: 'symbols_endpoint' }, 'Symbol mapping from API');
+        return result;
+      }
+    }
+
+    // Fallback: Vertex-style product ID convention
+    // Perp products use even IDs: 2=BTC, 4=ETH, 6=ARB, 8=SOL, etc.
+    // We also try query?type=contracts for market names
+    // For now, use known Vertex/Nado product ID mappings
+    const knownMappings: Record<number, string> = {
+      2: 'BTC-PERP',
+      4: 'ETH-PERP',
+    };
+
+    // For remaining pairs, match by oracle price ranges
+    const priceTargets: { pair: string; minPrice: number; maxPrice: number }[] = [
+      { pair: 'SOL-PERP', minPrice: 50, maxPrice: 300 },
+      { pair: 'BNB-PERP', minPrice: 300, maxPrice: 1000 },
+      { pair: 'HYPE-PERP', minPrice: 5, maxPrice: 100 },
+    ];
+
+    // Apply known mappings
+    for (const [pid, canonical] of Object.entries(knownMappings)) {
+      if (this.pairs.includes(canonical)) {
+        result.set(Number(pid), canonical);
+      }
+    }
+
+    // Match remaining by price
+    const matched = new Set(result.values());
+    for (const product of perpProducts) {
+      const pid = Number(product.product_id);
+      if (result.has(pid)) continue;
+
+      const priceX18 = BigInt(product.oracle_price_x18 ?? '0');
+      const price = Number(priceX18 / BigInt(10 ** 18));
+
+      for (const target of priceTargets) {
+        if (matched.has(target.pair)) continue;
+        if (price >= target.minPrice && price <= target.maxPrice) {
+          result.set(pid, target.pair);
+          matched.add(target.pair);
+          this.log.info({ pid, price, pair: target.pair }, 'Price-matched product');
+          break;
+        }
+      }
+    }
+
+    return result;
   }
 
   private connectWs(): Promise<void> {
