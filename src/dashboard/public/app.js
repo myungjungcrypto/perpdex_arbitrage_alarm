@@ -175,11 +175,14 @@
     const now = Date.now();
 
     spreadBody.innerHTML = display.map((s) => {
+      const isSlow = !!s.isSlowSpread;
       const pctClass = s.spreadPct >= 0.5 ? 'spread-high' :
                         s.spreadPct > 0 ? 'spread-positive' : 'spread-negative';
+      const rowClass = isSlow ? 'spread-slow' : '';
+      const slowTag = isSlow ? '<span class="slow-tag">vs AVG</span>' : '';
       const age = formatAge(now - s.timestamp);
-      return `<tr>
-        <td><strong>${s.pair}</strong></td>
+      return `<tr class="${rowClass}">
+        <td><strong>${s.pair}</strong>${slowTag}</td>
         <td>${s.longExchange}</td>
         <td class="num price-ask">$${fmt(s.longAsk)}</td>
         <td>${s.shortExchange}</td>

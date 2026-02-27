@@ -1,4 +1,4 @@
-import { loadConfig } from './config.js';
+import { loadConfig, getSlowExchangeConfig } from './config.js';
 import { logger, createChildLogger } from './logger.js';
 import { createAllAdapters } from './exchanges/index.js';
 import { PriceStore } from './engine/price-store.js';
@@ -18,7 +18,12 @@ async function main() {
 
   // 2. Create engine components
   const priceStore = new PriceStore();
-  const spreadCalc = new SpreadCalculator(priceStore);
+  const slowCfg = getSlowExchangeConfig();
+  const spreadCalc = new SpreadCalculator(priceStore, {
+    slowExchanges: new Set(slowCfg.exchanges),
+    slowMaxStaleMs: slowCfg.max_stale_ms,
+    minFastSources: slowCfg.min_fast_sources,
+  });
   const alertManager = new AlertManager();
   const telegram = new TelegramNotifier(
     config.alerts.telegram.bot_token,

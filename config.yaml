@@ -40,6 +40,17 @@ pairs:
   - HYPE-PERP
   - BNB-PERP
 
+# REST-only exchanges compared against market average (not pairwise)
+slow_exchanges:
+  exchanges:
+    - variational
+  max_stale_ms: 120000       # 2 min — allow older prices for REST-only
+  min_fast_sources: 2        # need at least 2 fast exchanges for meaningful average
+  threshold:
+    min_spread_pct: 1.0
+    sustained_ms: 5000
+    cooldown_ms: 60000
+
 thresholds:
   default:
     min_spread_pct: 0.3

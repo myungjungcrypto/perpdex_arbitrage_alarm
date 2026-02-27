@@ -17,6 +17,7 @@ export interface SpreadData {
   spreadAbs: number;     // shortBid - longAsk
   spreadPct: number;     // spreadAbs / longAsk * 100
   timestamp: number;
+  isSlowSpread?: boolean; // true = slow exchange vs market average
 }
 
 export interface SpreadAlert extends SpreadData {
@@ -45,9 +46,17 @@ export interface ExchangeConfig {
   poll_interval_ms?: number;
 }
 
+export interface SlowExchangeConfig {
+  exchanges: string[];
+  max_stale_ms: number;
+  min_fast_sources: number;
+  threshold: ThresholdConfig;
+}
+
 export interface AppConfig {
   exchanges: Record<string, ExchangeConfig>;
   pairs: string[];
+  slow_exchanges?: SlowExchangeConfig;
   thresholds: {
     default: ThresholdConfig;
     [pair: string]: Partial<ThresholdConfig>;

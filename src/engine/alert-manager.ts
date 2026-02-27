@@ -20,7 +20,7 @@ export class AlertManager extends EventEmitter {
   onSpread(spread: SpreadData) {
     const [exA, exB] = [spread.longExchange, spread.shortExchange].sort();
     const key = `${spread.pair}:${exA}:${exB}`;
-    const threshold = getThreshold(spread.pair);
+    const threshold = getThreshold(spread.pair, spread.isSlowSpread);
     const now = Date.now();
 
     if (spread.spreadPct >= threshold.min_spread_pct) {

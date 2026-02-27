@@ -45,13 +45,18 @@ export class TelegramNotifier {
   }
 
   private formatAlert(alert: SpreadAlert): string {
+    const isSlow = alert.isSlowSpread;
+    const header = isSlow
+      ? `⚠️ *SLOW EXCHANGE ALERT: ${alert.pair}*`
+      : `🚨 *SPREAD ALERT: ${alert.pair}*`;
     const dir = alert.spreadAbs > 0
       ? `Buy ${alert.longExchange} → Sell ${alert.shortExchange}`
       : `Negative spread`;
     const time = new Date(alert.timestamp).toISOString().replace('T', ' ').slice(0, 19);
+    const note = isSlow ? '\n_Note: slow exchange vs market average_' : '';
 
     return [
-      `🚨 *SPREAD ALERT: ${alert.pair}*`,
+      header,
       '',
       `${alert.longExchange}: $${alert.longAsk.toFixed(2)} (ask)`,
       `${alert.shortExchange}: $${alert.shortBid.toFixed(2)} (bid)`,
@@ -60,6 +65,7 @@ export class TelegramNotifier {
       `Direction: ${dir}`,
       `Duration: ${(alert.durationMs / 1000).toFixed(1)}s`,
       `Time: ${time} UTC`,
+      note,
     ].join('\n');
   }
 }

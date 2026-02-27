@@ -37,9 +37,21 @@ export function getConfig(): AppConfig {
   return _config;
 }
 
-export function getThreshold(pair: string) {
+export function getThreshold(pair: string, isSlow = false) {
   const cfg = getConfig();
+  if (isSlow && cfg.slow_exchanges?.threshold) {
+    return { ...cfg.thresholds.default, ...cfg.slow_exchanges.threshold };
+  }
   const pairOverride = cfg.thresholds[pair];
   const defaults = cfg.thresholds.default;
   return { ...defaults, ...pairOverride } as Required<typeof defaults>;
+}
+
+export function getSlowExchangeConfig() {
+  const cfg = getConfig();
+  return cfg.slow_exchanges ?? { exchanges: [], max_stale_ms: 120000, min_fast_sources: 2, threshold: cfg.thresholds.default as Required<typeof cfg.thresholds.default> };
+}
+
+export function getSlowExchangeSet(): Set<string> {
+  return new Set(getSlowExchangeConfig().exchanges);
 }

@@ -191,6 +191,24 @@ tr:hover td {
 .price-ask { color: var(--red); }
 .price-stale { opacity: 0.4; }
 
+/* Slow exchange spread rows (e.g. variational vs market-avg) */
+.spread-slow {
+  background: rgba(31, 111, 235, 0.06);
+  border-left: 3px solid var(--blue);
+}
+.spread-slow td { opacity: 0.75; }
+.slow-tag {
+  display: inline-block;
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(88, 166, 255, 0.15);
+  color: var(--blue);
+  margin-left: 4px;
+  vertical-align: middle;
+  font-weight: 600;
+}
+
 /* Highlight flash for updated cells */
 .flash {
   animation: flash 0.6s ease-out;
