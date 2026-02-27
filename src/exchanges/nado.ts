@@ -1,3 +1,4 @@
+import { writeFileSync } from 'fs';
 import WebSocket from 'ws';
 import { BaseExchangeAdapter } from './base.js';
 import { registerAdapter } from './registry.js';
@@ -81,28 +82,23 @@ export class NadoAdapter extends BaseExchangeAdapter {
       const spotProducts = inner?.spot_products ?? inner?.spotProducts ?? [];
       const allProducts = [...perpProducts, ...spotProducts];
 
-      // Log first 3 products in full for debugging symbol mapping
-      for (let i = 0; i < Math.min(3, allProducts.length); i++) {
-        this.log.info({
-          index: i,
-          keys: Object.keys(allProducts[i]),
-          configKeys: allProducts[i].config ? Object.keys(allProducts[i].config) : 'no config',
-          product: JSON.stringify(allProducts[i]).slice(0, 500),
-        }, 'Sample product');
-      }
+      // Dump first 3 products to file for debugging
+      const debugData = {
+        topKeys: data ? Object.keys(data) : [],
+        innerKeys: inner ? Object.keys(inner) : [],
+        perpCount: perpProducts.length,
+        spotCount: spotProducts.length,
+        first3: allProducts.slice(0, 3),
+      };
+      try { writeFileSync('/tmp/nado_debug.json', JSON.stringify(debugData, null, 2)); } catch {}
 
-      // Collect all symbols for debugging
-      const allSymbols: string[] = [];
       for (const product of allProducts) {
         const productId = product.product_id ?? product.productId;
         if (productId === undefined) continue;
 
-        // Symbol is in config.symbol (from SDK docs) or at top level
         const symbol = product.config?.symbol ?? product.symbol ?? product.config?.ticker ?? product.name ?? '';
         const pid = Number(productId);
-        allSymbols.push(`${pid}:${symbol || '(empty)'}`);
 
-        // Try to match to our canonical pairs
         const canonical = this.findCanonical(symbol);
         if (canonical) {
           this.productIdToCanonical.set(pid, canonical);
@@ -110,17 +106,10 @@ export class NadoAdapter extends BaseExchangeAdapter {
         }
       }
 
-      // Log first 3 products raw structure
-      const sampleProducts = allProducts.slice(0, 3).map((p: any) => JSON.stringify(p).slice(0, 400));
-
       this.log.info({
         mapped: this.productIdToCanonical.size,
         mappings: Object.fromEntries(this.productIdToCanonical),
         totalProducts: allProducts.length,
-        allSymbols: allSymbols.join(', '),
-        sampleRaw: sampleProducts,
-        perpCount: (inner?.perp_products ?? inner?.perpProducts ?? []).length,
-        spotCount: (inner?.spot_products ?? inner?.spotProducts ?? []).length,
       }, 'Products fetched');
     } catch (err) {
       this.log.error({ err }, 'Failed to fetch products');
